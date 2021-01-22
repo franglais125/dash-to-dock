@@ -9,6 +9,7 @@ const Signals = imports.signals;
 const Meta = imports.gi.Meta;
 const Shell = imports.gi.Shell;
 const St = imports.gi.St;
+const Gtk = imports.gi.Gtk;
 
 // Use __ () and N__() for the extension gettext domain, and reuse
 // the shell domain with the default _() and N_()
@@ -60,6 +61,9 @@ let recentlyClickedApp = null;
 let recentlyClickedAppWindows = null;
 let recentlyClickedAppIndex = 0;
 let recentlyClickedAppMonitor = -1;
+
+// Icon list might change over time, so we keep a global variable
+let appIconsHoverList = null;
 
 /**
  * Extend AppIcon
@@ -316,8 +320,17 @@ class MyAppIcon extends Dash.DashIcon {
                     let additional_margin = this._isHorizontal && !fixedDock ? Main.overview.dash.height : 0;
                     let verticalMargins = this._menu.actor.margin_top + this._menu.actor.margin_bottom;
                     // Also set a max width to the menu, so long labels (long windows title) get truncated
+                    let monitor = Main.layoutManager.monitors[this.monitorIndex];
+                    let max_width = Math.round(monitor.width / 3);
                     this._menu.actor.style = ('max-height: ' + Math.round(workArea.height - additional_margin - verticalMargins) + 'px;' +
-                                              'max-width: 400px');
+                                              'max-width: ' + max_width + 'px');
+                }
+
+                // Close the window previews
+                if (this._previewMenu) {
+                    this._previewMenu.cancelOpen();
+                    if (this._previewMenu.isOpen)
+                        this._previewMenu.close(~0);
                 }
             });
             let id = Main.overview.connect('hiding', () => {
@@ -389,6 +402,8 @@ class MyAppIcon extends Dash.DashIcon {
         // Some action modes (e.g. MINIMIZE_OR_OVERVIEW) require overview to remain open
         // This variable keeps track of this
         let shouldHideOverview = true;
+
+        let shouldClosePreview = true;
 
         // We customize the action only when the application is already running
         if (appIsRunning) {
@@ -487,8 +502,11 @@ class MyAppIcon extends Dash.DashIcon {
                     if (windows.length == 1 && !modifiers && button == 1) {
                         let w = windows[0];
                         Main.activateWindow(w);
-                    } else
+                    }
+                    else {
                         this._windowPreviews();
+                        shouldClosePreview = false;
+                    }
                 }
                 else {
                     this.app.activate();
@@ -532,6 +550,9 @@ class MyAppIcon extends Dash.DashIcon {
             this.launchNewWindow();
         }
 
+        if (this._previewMenu && this._previewMenu.isOpen && shouldClosePreview)
+            this._previewMenu.hoverClose(~0);
+
         // Hide overview except when action mode requires it
         if(shouldHideOverview) {
             Main.overview.hide();
@@ -543,33 +564,113 @@ class MyAppIcon extends Dash.DashIcon {
                             (!this._previewMenu || !this._previewMenu.isOpen);
     }
 
+    _createPreviewMenus() {
+        this._previewMenuManager = new PopupMenu.PopupMenuManager(this);
+
+        this._previewMenu = new WindowPreview.WindowPreviewMenu(this, this._dtdSettings);
+
+        this._previewMenuManager.addMenu(this._previewMenu);
+        this._previewMenu.connect('open-state-changed', (menu, isPoppedUp)=> {
+            if (!isPoppedUp)
+                this._onMenuPoppedDown();
+        });
+
+        let id = Main.overview.connect('hiding', ()=> {
+            this._previewMenu.close();
+        });
+        this._previewMenu.actor.connect('destroy', function() {
+            Main.overview.disconnect(id);
+        });
+    }
+
     _windowPreviews() {
-        if (!this._previewMenu) {
-            this._previewMenuManager = new PopupMenu.PopupMenuManager(this);
+        if (!this._previewMenu)
+            this._createPreviewMenus();
 
-            this._previewMenu = new WindowPreview.WindowPreviewMenu(this);
-
-            this._previewMenuManager.addMenu(this._previewMenu);
-
-            this._previewMenu.connect('open-state-changed', (menu, isPoppedUp) => {
-                if (!isPoppedUp)
-                    this._onMenuPoppedDown();
-            });
-            let id = Main.overview.connect('hiding', () => {
-                this._previewMenu.close();
-            });
-            this._previewMenu.actor.connect('destroy', function() {
-                Main.overview.disconnect(id);
-            });
-
+        if (this._previewMenu.isOpen) {
+            this._previewMenu.close();
+        }
+        else {
+            this._previewMenu.fromHover = false;
+            this._previewMenu.popup();
+            this._previewMenu.actor.navigate_focus(null, Gtk.DirectionType.TAB_FORWARD, false);
         }
 
-        if (this._previewMenu.isOpen)
-            this._previewMenu.close();
-        else
-            this._previewMenu.popup();
-
         return false;
+    }
+
+    enableHover(appIcons) {
+        appIconsHoverList = appIcons;
+        if (this._hoverIsEnabled)
+            return;
+        this._hoverIsEnabled = true;
+
+        if (!this._previewMenu)
+            this._createPreviewMenus();
+
+        this._signalsHandler.addWithLabel('preview-hover', [
+            this._previewMenu,
+            'menu-closed',
+            function(menu) {
+                // enter-event doesn't fire on an app icon when the popup menu from a previously
+                // hovered app icon is still open, so when a preview menu closes we need to
+                // see if a new app icon is hovered and open its preview menu now.
+                // also, for some reason actor doesn't report being hovered by get_hover()
+                // if the hover started when a popup was opened. So, look for the actor by mouse position.
+                let [x, y,] = global.get_pointer();
+                let hoveredActor = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
+                let appIconToOpen;
+                appIconsHoverList.forEach(function (appIcon) {
+                    if(appIcon == hoveredActor) {
+                        appIconToOpen = appIcon;
+                    } else if(appIcon._previewMenu && appIcon._previewMenu.isOpen) {
+                        appIcon._previewMenu.close();
+                    }
+                });
+
+                if (appIconToOpen) {
+                    appIconToOpen.sync_hover();
+                    if (appIconToOpen._previewMenu && appIconToOpen._previewMenu != menu)
+                        appIconToOpen._previewMenu._onEnter();
+                }
+                return GLib.SOURCE_REMOVE;
+            }
+        ]);
+
+        let windowPreviewMenuData = this._previewMenuManager._menus[this._previewMenuManager._findMenu(this._previewMenu)];
+        this._previewMenu.disconnect(windowPreviewMenuData.openStateChangeId);
+        windowPreviewMenuData.openStateChangeId = this._previewMenu.connect(
+            'open-state-changed',
+            function(menu, open) {
+                if (menu.fromHover) {
+                    if (open) {
+                        if (this.activeMenu)
+                            this.activeMenu.close(BoxPointer.PopupAnimation.FADE);
+
+                        // don't grab here, we are grabbing in onLeave in windowPreview.js
+                        // this._grabHelper.grab({
+                        //     actor: menu.actor,
+                        //     focus: menu.sourceActor,
+                        //     onUngrab: Lang.bind(this, this._closeMenu, menu)
+                        // });
+                    } else {
+                        this._grabHelper.ungrab({ actor: menu.actor });
+                    }
+                }
+                else
+                    this._onMenuOpenState(menu, open);
+            }.bind(this._previewMenuManager)
+        );
+
+        this._previewMenu.enableHover();
+    }
+
+    disableHover() {
+        this._hoverIsEnabled = false;
+
+        this._signalsHandler.removeWithLabel('preview-hover');
+        if (this._previewMenu)
+            this._previewMenu.disableHover();
     }
 
     // Try to do the right thing when attempting to launch a new window of an app. In
@@ -1032,7 +1133,7 @@ const MyAppIconMenu = class DashToDock_MyAppIconMenu extends AppDisplay.AppIconM
                         separatorShown = true;
                     }
 
-                    let item = new WindowPreview.WindowPreviewMenuItem(window);
+                    let item = new WindowPreview.WindowPreviewMenuItem(window, this._source);
                     this._allWindowsMenuItem.menu.addMenuItem(item);
                     item.connect('activate', () => {
                         this.emit('activate-window', window);

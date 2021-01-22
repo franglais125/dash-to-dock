@@ -178,6 +178,8 @@ var MyDash = GObject.registerClass({
 }, class DashToDock_MyDash extends St.Bin {
 
     _init(remoteModel, monitorIndex) {
+        this._dtdSettings = Docking.DockManager.settings;
+
         // Initialize icon variables and size
         this._maxHeight = -1;
         this.iconSize = Docking.DockManager.settings.get_int('dash-max-icon-size');
@@ -281,6 +283,10 @@ var MyDash = GObject.registerClass({
             Main.overview,
             'item-drag-cancelled',
             this._onDragCancelled.bind(this)
+        ], [
+            this._dtdSettings,
+            'changed::show-previews-hover',
+            this._togglePreviewHover.bind(this)
         ]);
 
         this.connect('destroy', this._onDestroy.bind(this));
@@ -536,6 +542,27 @@ var MyDash = GObject.registerClass({
         this._hookUpLabel(item, appIcon);
 
         return item;
+    }
+
+    _togglePreviewHover() {
+        if (this._dtdSettings.get_boolean('show-previews-hover'))
+            this._enableHover();
+        else
+            this._disableHover();
+    }
+
+    _enableHover() {
+        let appIcons = this.getAppIcons();
+        appIcons.forEach(function (appIcon) {
+            appIcon.enableHover(appIcons);
+        });
+    }
+
+    _disableHover() {
+        let appIcons = this.getAppIcons();
+        appIcons.forEach(function (appIcon) {
+            appIcon.disableHover();
+        });
     }
 
     /**
@@ -873,6 +900,9 @@ var MyDash = GObject.registerClass({
 
         // This will update the size, and the corresponding number for each icon
         this._updateNumberOverlay();
+
+        // Connect windows previews to hover events
+        this._togglePreviewHover();
     }
 
     _updateNumberOverlay() {

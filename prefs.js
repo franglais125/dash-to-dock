@@ -659,6 +659,11 @@ var Settings = class DashToDock_Settings {
 
         });
 
+        this._settings.bind('show-previews-hover',
+                            this._builder.get_object('preview_hover_switch'),
+                            'active',
+                            Gio.SettingsBindFlags.DEFAULT);
+
         // Appearance Panel
 
         this._settings.bind('apply-custom-theme', this._builder.get_object('customize_theme'), 'sensitive', Gio.SettingsBindFlags.INVERT_BOOLEAN | Gio.SettingsBindFlags.GET);

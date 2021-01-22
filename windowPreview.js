@@ -9,6 +9,7 @@ const GLib = imports.gi.GLib;
 const GObject = imports.gi.GObject;
 const St = imports.gi.St;
 const Main = imports.ui.main;
+const Mainloop = imports.mainloop;
 
 const Params = imports.misc.params;
 const PopupMenu = imports.ui.popupMenu;
@@ -20,6 +21,13 @@ const Utils = Me.imports.utils;
 const PREVIEW_MAX_WIDTH = 250;
 const PREVIEW_MAX_HEIGHT = 150;
 
+/*
+ * Timeouts for the hovering events
+ */
+const HOVER_ENTER_TIMEOUT = 100;
+const HOVER_LEAVE_TIMEOUT = 100;
+const HOVER_MENU_LEAVE_TIMEOUT = 500;
+
 const PREVIEW_ANIMATION_DURATION = 250;
 
 var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.PopupMenu {
@@ -27,9 +35,6 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
     constructor(source) {
         let side = Utils.getPosition();
         super(source, 0.5, side);
-
-        // We want to keep the item hovered while the menu is up
-        this.blockSourceEvents = true;
 
         this._source = source;
         this._app = this._source.app;
@@ -54,7 +59,10 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         this._boxPointer._arrowSide = side;
         this._boxPointer._userArrowSide = side;
 
-        this.connect('destroy', this._onDestroy.bind(this));
+        this._previewBox = new WindowPreviewList(this._source, this._dtdSettings);
+        this.addMenuItem(this._previewBox);
+
+        this.fromHover = false;
     }
 
     _redisplay() {
@@ -70,17 +78,134 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         if (windows.length > 0) {
             this._redisplay();
             this.open();
-            this.actor.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
             this._source.emit('sync-tooltip');
         }
     }
 
-    _onDestroy() {
+    destroy() {
+        this.disableHover();
+
         if (this._mappedId)
             this._source.disconnect(this._mappedId);
 
         if (this._destroyId)
             this._source.disconnect(this._destroyId);
+    }
+
+    enableHover() {
+        // Show window previews on mouse hover
+        this._enterSourceId = this._source.connect('enter-event', this._onEnter.bind(this));
+        this._leaveSourceId = this._source.connect('leave-event', this._onLeave.bind(this));
+
+        this._enterMenuId = this.actor.connect('enter-event', this._onMenuEnter.bind(this));
+        this._leaveMenuId = this.actor.connect('leave-event', this._onMenuLeave.bind(this));
+    }
+
+    disableHover() {
+        if (this._enterSourceId) {
+            this._source.disconnect(this._enterSourceId);
+            this._enterSourceId = 0;
+        }
+        if (this._leaveSourceId) {
+            this._source.disconnect(this._leaveSourceId);
+            this._leaveSourceId = 0;
+        }
+
+        if (this._enterMenuId) {
+            this.actor.disconnect(this._enterMenuId);
+            this._enterMenuId = 0;
+        }
+        if (this._leaveMenuId) {
+            this.actor.disconnect(this._leaveMenuId);
+            this._leaveMenuId = 0;
+        }
+    }
+
+    _onEnter() {
+        this.cancelOpen();
+        this.cancelClose();
+
+        this._hoverOpenTimeoutId = Mainloop.timeout_add(
+            HOVER_ENTER_TIMEOUT,
+            this.hoverOpen.bind(this)
+        );
+    }
+
+    _onLeave() {
+        this.cancelOpen();
+        this.cancelClose();
+
+        // grabHelper.grab() is usually called when the menu is opened. However, there seems to be a bug in the
+        // underlying gnome-shell that causes all window contents to freeze if the grab and ungrab occur
+        // in quick succession in timeouts from the Mainloop (for example, clicking the icon as the preview window is opening)
+        // So, instead wait until the mouse is leaving the icon (and might be moving toward the open window) to trigger the grab
+        if (this.isOpen) {
+            this._source._previewMenuManager._grabHelper.grab({
+                actor: this.actor,
+                focus: this.sourceActor,
+                onUngrab: () => {
+                    this.close(~0);
+                }
+            });
+        }
+
+        this._hoverCloseTimeoutId = Mainloop.timeout_add(
+            HOVER_LEAVE_TIMEOUT,
+            this.hoverClose.bind(this)
+        );
+    }
+
+    cancelOpen() {
+        if (this._hoverOpenTimeoutId) {
+            Mainloop.source_remove(this._hoverOpenTimeoutId);
+            this._hoverOpenTimeoutId = null;
+        }
+    }
+
+    cancelClose() {
+        if (this._hoverCloseTimeoutId) {
+            Mainloop.source_remove(this._hoverCloseTimeoutId);
+            this._hoverCloseTimeoutId = null;
+        }
+    }
+
+    hoverOpen() {
+        this._hoverOpenTimeoutId = null;
+        if (!this.isOpen) {
+            this.fromHover = true;
+            this.popup();
+        }
+    }
+
+    hoverClose() {
+        this._hoverCloseTimeoutId = null;
+
+        if (!this.fromHover)
+            return;
+
+        if (this.isOpen)
+            this.close(~0);
+        this.fromHover = false;
+    }
+
+    _onMenuEnter() {
+        if (!this.fromHover)
+            return;
+
+        this.cancelClose();
+    }
+
+    _onMenuLeave() {
+        if (!this.fromHover)
+            return;
+
+        this.cancelOpen();
+        this.cancelClose();
+
+        this._hoverCloseTimeoutId = Mainloop.timeout_add(
+            HOVER_MENU_LEAVE_TIMEOUT,
+            this.hoverClose.bind(this)
+        );
     }
 };
 
@@ -172,7 +297,7 @@ var WindowPreviewList = class DashToDock_WindowPreviewList extends PopupMenu.Pop
     }
 
     _createPreviewItem(window) {
-        let preview = new WindowPreviewMenuItem(window);
+        let preview = new WindowPreviewMenuItem(window, this._source);
         return preview;
     }
 
@@ -314,7 +439,7 @@ var WindowPreviewList = class DashToDock_WindowPreviewList extends PopupMenu.Pop
 
 var WindowPreviewMenuItem = GObject.registerClass(
 class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
-    _init(window, params) {
+    _init(window, source, params) {
         super._init(params);
 
         this._window = window;
@@ -326,9 +451,13 @@ class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
         this.remove_child(this._ornamentLabel);
         this.add_style_class_name('dashtodock-app-well-preview-menu-item');
 
-        // Now we don't have to set PREVIEW_MAX_WIDTH and PREVIEW_MAX_HEIGHT as preview size - that made all kinds of windows either stretched or squished (aspect ratio problem)
+        let monitorIndex = source.monitorIndex;
+        let monitor = Main.layoutManager.monitors[monitorIndex];
+        this._preview_max_width = Math.round(monitor.width / 5);
+        this._preview_max_height = Math.round(monitor.height / 5);
+
         this._cloneBin = new St.Bin();
-        this._cloneBin.set_size(this._width*this._scale, this._height*this._scale);
+        this._cloneBin.set_size(this._preview_max_width, this._preview_max_height);
 
         // TODO: improve the way the closebutton is layout. Just use some padding
         // for the moment.
@@ -351,7 +480,7 @@ class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
         overlayGroup.add_actor(this.closeButton);
 
         let label = new St.Label({ text: window.get_title()});
-        label.set_style('max-width: '+PREVIEW_MAX_WIDTH +'px');
+        label.set_style('max-width: ' + this._preview_max_width + 'px');
         let labelBin = new St.Bin({ child: label,
             x_align: Clutter.ActorAlign.CENTER,
         });

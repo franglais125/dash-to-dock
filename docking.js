@@ -329,6 +329,12 @@ var DockedDash = GObject.registerClass({
         this.dash._container.connect('notify::allocation', this._updateStaticBox.bind(this));
         this._slider.connect(this._isHorizontal ? 'notify::x' : 'notify::y', this._updateStaticBox.bind(this));
 
+        // sync hover after a popupmenu is closed
+        this.dash.connect('menu-closed', () => {
+            this._box.sync_hover();
+            this._hoverChanged();
+        });
+
         // Load optional features that need to be activated for one dock only
         if (this._monitorIndex == settings.get_int('preferred-monitor'))
             this._enableExtraFeatures();
@@ -668,8 +674,14 @@ var DockedDash = GObject.registerClass({
         this._updateDashVisibility();
     }
 
-    _hoverChanged() {
-        if (!this._ignoreHover) {
+   _hoverChanged() {
+        let dontClose = false;
+        this.dash.getAppIcons().forEach(function(appIcon) {
+            if (appIcon._previewMenu && appIcon._previewMenu.isOpen)
+                dontClose = true;
+        });
+
+        if (!this._ignoreHover && !dontClose) {
             // Skip if dock is not in autohide mode for instance because it is shown
             // by intellihide.
             if (this._autohideIsEnabled) {
