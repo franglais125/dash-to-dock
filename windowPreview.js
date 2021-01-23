@@ -39,6 +39,7 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         this._source = source;
         this._app = this._source.app;
         let monitorIndex = this._source.monitorIndex;
+        this._signalsHandler = new Utils.GlobalSignalsHandler();
 
         this.actor.add_style_class_name('app-well-menu');
         this.actor.set_style('max-width: '  + (Main.layoutManager.monitors[monitorIndex].width  - 22) + 'px; ' +
@@ -46,11 +47,18 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         this.actor.hide();
 
         // Chain our visibility and lifecycle to that of the source
-        this._mappedId = this._source.connect('notify::mapped', () => {
-            if (!this._source.mapped)
-                this.close();
-        });
-        this._destroyId = this._source.connect('destroy', this.destroy.bind(this));
+        this._signalsHandler.add([
+            this._source,
+            "notify::mapped",
+            () => {
+                if (!this._source.mapped)
+                    this.close();
+            }
+        ], [
+            this._source,
+            'destroy',
+            this.destroy.bind(this)
+        ]);
 
         Main.uiGroup.add_actor(this.actor);
 
@@ -83,42 +91,32 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
     }
 
     destroy() {
-        this.disableHover();
-
-        if (this._mappedId)
-            this._source.disconnect(this._mappedId);
-
-        if (this._destroyId)
-            this._source.disconnect(this._destroyId);
+        this._signalsHandler.destroy();
     }
 
     enableHover() {
         // Show window previews on mouse hover
-        this._enterSourceId = this._source.connect('enter-event', this._onEnter.bind(this));
-        this._leaveSourceId = this._source.connect('leave-event', this._onLeave.bind(this));
-
-        this._enterMenuId = this.actor.connect('enter-event', this._onMenuEnter.bind(this));
-        this._leaveMenuId = this.actor.connect('leave-event', this._onMenuLeave.bind(this));
+        this._signalsHandler.addWithLabel('hover_signals', [
+            this._source,
+            'enter-event',
+            this._onEnter.bind(this)
+        ], [
+            this._source,
+            'leave-event',
+            this._onLeave.bind(this)
+        ], [
+            this.actor,
+            'enter-event',
+            this._onMenuEnter.bind(this)
+        ], [
+            this.actor,
+            'leave-event',
+            this._onMenuLeave.bind(this)
+        ]);
     }
 
     disableHover() {
-        if (this._enterSourceId) {
-            this._source.disconnect(this._enterSourceId);
-            this._enterSourceId = 0;
-        }
-        if (this._leaveSourceId) {
-            this._source.disconnect(this._leaveSourceId);
-            this._leaveSourceId = 0;
-        }
-
-        if (this._enterMenuId) {
-            this.actor.disconnect(this._enterMenuId);
-            this._enterMenuId = 0;
-        }
-        if (this._leaveMenuId) {
-            this.actor.disconnect(this._leaveMenuId);
-            this._leaveMenuId = 0;
-        }
+        this._signalsHandler.removeWithLabel('hover_signals');
     }
 
     _onEnter() {
