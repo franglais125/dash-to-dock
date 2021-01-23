@@ -18,9 +18,6 @@ const Workspace = imports.ui.workspace;
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const Utils = Me.imports.utils;
 
-const PREVIEW_MAX_WIDTH = 250;
-const PREVIEW_MAX_HEIGHT = 150;
-
 /*
  * Timeouts for the hovering events
  */
@@ -457,7 +454,6 @@ class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
         this._window = window;
         this._destroyId = 0;
         this._windowAddedId = 0;
-        [this._width, this._height, this._scale] = this._getWindowPreviewSize(); // This gets the actual windows size for the preview
 
         // We don't want this: it adds spacing on the left of the item.
         this.remove_child(this._ornamentLabel);
@@ -468,8 +464,13 @@ class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
         this._preview_max_width = Math.round(monitor.width / 5);
         this._preview_max_height = Math.round(monitor.height / 5);
 
+        [this._width, this._height, this._scale] = this._getWindowPreviewSize(this._preview_max_width, this._preview_max_height); // This gets the actual windows size for the preview
+
+        this._preview_width = this._width * this._scale;
+        this._preview_height = this._height * this._scale;
+
         this._cloneBin = new St.Bin();
-        this._cloneBin.set_size(this._preview_max_width, this._preview_max_height);
+        this._cloneBin.set_size(this._preview_width, this._preview_height);
 
         // TODO: improve the way the closebutton is layout. Just use some padding
         // for the moment.
@@ -513,10 +514,10 @@ class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
         this.connect('destroy', this._onDestroy.bind(this));
     }
 
-    _getWindowPreviewSize() {
+    _getWindowPreviewSize(max_width, max_height) {
         let mutterWindow = this._window.get_compositor_private();
         let [width, height] = mutterWindow.get_size();
-        let scale = Math.min(1.0, PREVIEW_MAX_WIDTH/width, PREVIEW_MAX_HEIGHT/height);
+        let scale = Math.min(1.0, max_width / width, max_height / height);
         return [width, height, scale];
     }
 
