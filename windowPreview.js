@@ -62,17 +62,9 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
             Main.overview,
             'showing',
             () => {
-                this._inOverview = true;
-                this.fromHover = true;
-
                 // force close current preview
+                this.fromHover = true;
                 this._onLeave();
-            }
-        ], [
-            Main.overview,
-            'hiding',
-            () => {
-                this._inOverview = false;
             }
         ]);
 
@@ -136,7 +128,7 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
     }
 
     _onEnter() {
-        if (this._inOverview)
+        if (Main.overview._shown)
             return;
         this.cancelOpen();
         this.cancelClose();
@@ -208,7 +200,7 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         if (!this.fromHover)
             return;
 
-        if (this._inOverview)
+        if (Main.overview._shown)
             return;
 
         this.cancelClose();
