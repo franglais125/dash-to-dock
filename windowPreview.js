@@ -39,11 +39,12 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         this._source = source;
         this._app = this._source.app;
         let monitorIndex = this._source.monitorIndex;
+        let monitor = Main.layoutManager.monitors[monitorIndex];
         this._signalsHandler = new Utils.GlobalSignalsHandler();
 
         this.actor.add_style_class_name('app-well-menu');
-        this.actor.set_style('max-width: '  + (Main.layoutManager.monitors[monitorIndex].width  - 22) + 'px; ' +
-                             'max-height: ' + (Main.layoutManager.monitors[monitorIndex].height - 22) + 'px;');
+        this.actor.set_style('max-width: '  + (monitor.width  - 22) + 'px; ' +
+                             'max-height: ' + (monitor.height - 22) + 'px;');
         this.actor.hide();
 
         // Chain our visibility and lifecycle to that of the source
@@ -75,7 +76,7 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
         this._boxPointer._arrowSide = side;
         this._boxPointer._userArrowSide = side;
 
-        this._previewBox = new WindowPreviewList(this._source, this._dtdSettings);
+        this._previewBox = new WindowPreviewList(this._source);
         this.addMenuItem(this._previewBox);
 
         this.fromHover = false;
@@ -501,8 +502,8 @@ class DashToDock_WindowPreviewMenuItem extends PopupMenu.PopupBaseMenuItem {
                               });
 
         let box = new St.BoxLayout({ vertical: true,
-                                     reactive:true,
-                                     x_expand:true });
+                                     reactive: true,
+                                     x_expand: true });
         box.add(overlayGroup);
         box.add(labelBin);
         this.add_actor(box);
