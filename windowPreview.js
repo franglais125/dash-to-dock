@@ -58,6 +58,22 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
             this._source,
             'destroy',
             this.destroy.bind(this)
+        ], [
+            Main.overview,
+            'showing',
+            () => {
+                this._inOverview = true;
+                this.fromHover = true;
+
+                // force close current preview
+                this._onLeave();
+            }
+        ], [
+            Main.overview,
+            'hiding',
+            () => {
+                this._inOverview = false;
+            }
         ]);
 
         Main.uiGroup.add_actor(this.actor);
@@ -120,6 +136,8 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
     }
 
     _onEnter() {
+        if (this._inOverview)
+            return;
         this.cancelOpen();
         this.cancelClose();
 
@@ -188,6 +206,9 @@ var WindowPreviewMenu = class DashToDock_WindowPreviewMenu extends PopupMenu.Pop
 
     _onMenuEnter() {
         if (!this.fromHover)
+            return;
+
+        if (this._inOverview)
             return;
 
         this.cancelClose();
